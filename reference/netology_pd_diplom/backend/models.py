@@ -72,6 +72,7 @@ class User(AbstractUser):
     company = models.CharField(verbose_name='Компания', max_length=40, blank=True)
     position = models.CharField(verbose_name='Должность', max_length=40, blank=True)
     username_validator = UnicodeUsernameValidator()
+    token = models.CharField(max_length=255, blank=True, null=True)
     username = models.CharField(
         _('username'),
         max_length=150,
@@ -83,7 +84,7 @@ class User(AbstractUser):
     )
     is_active = models.BooleanField(
         _('active'),
-        default=False,
+        default=True,
         help_text=_(
             'Designates whether this user should be treated as active. '
             'Unselect this instead of deleting accounts.'
@@ -292,6 +293,14 @@ class ConfirmEmailToken(models.Model):
         max_length=64,
         db_index=True,
         unique=True
+    )
+
+    email = models.EmailField(
+        _("Email"),
+        max_length=254,
+        blank=False,
+        null=False,
+        default=''
     )
 
     def save(self, *args, **kwargs):

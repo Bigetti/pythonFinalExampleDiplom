@@ -1,7 +1,11 @@
 # Верстальщик
 from rest_framework import serializers
+from .models import User
+import string
+import random
 
-from backend.models import User, Category, Shop, ProductInfo, Product, ProductParameter, OrderItem, Order, Contact
+
+from backend.models import User, Category, Shop, ProductInfo, Product, ProductParameter, OrderItem, Order, Contact, ConfirmEmailToken
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -15,13 +19,31 @@ class ContactSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    contacts = ContactSerializer(read_only=True, many=True)
-
     class Meta:
         model = User
-        fields = ('id', 'first_name', 'last_name', 'email', 'company', 'position', 'contacts')
-        read_only_fields = ('id',)
+        fields = ('id', 'first_name', 'last_name', 'email', 'company', 'position', 'token')
+        read_only_fields = ('id', 'token')
 
+    def to_representation(self, instance):
+        # Выводим информацию о сериализуемом пользователе
+        print("Serializing user:", instance)
+        return super().to_representation(instance)
+    
+
+    def create(self, validated_data):
+        user = User.objects.create_user(**validated_data)
+        # Генерируем токен и сохраняем его в поле `token`
+        # user.token = ''.join(random.choices(string.ascii_uppercase + string.digits, k=32))
+        # user.save()
+
+        # confirmation_token = ConfirmEmailToken.objects.create(user=user)
+        confirmation_token = ConfirmEmailToken.objects.create(user=user, email=user.email)
+        confirmation_token.save()
+        # Выводим ключ токена в консоль
+        print(f"Created confirmation token: {confirmation_token.key}")
+        return user
+    
+        
 
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:

@@ -14,12 +14,35 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from ujson import loads as load_json
 from yaml import load as load_yaml, Loader
+from django.contrib.auth.models import User
+import random
+from rest_framework import status
+import string
+from django.contrib.auth import get_user_model
+from rest_framework import generics
 
-from backend.models import Shop, Category, Product, ProductInfo, Parameter, ProductParameter, Order, OrderItem, \
+
+
+
+
+from backend.models import Shop, Category, User, Product, ProductInfo, Parameter, ProductParameter, Order, OrderItem, \
     Contact, ConfirmEmailToken
 from backend.serializers import UserSerializer, CategorySerializer, ShopSerializer, ProductInfoSerializer, \
     OrderItemSerializer, OrderSerializer, ContactSerializer
 from backend.signals import new_user_registered, new_order
+
+from django.http import HttpResponse
+
+
+
+
+
+class HomeView(APIView):
+
+   def get(self, request):
+        return HttpResponse("Hello, this is the home page!")
+   
+
 
 
 class RegisterAccount(APIView):
@@ -43,12 +66,10 @@ class RegisterAccount(APIView):
         if {'first_name', 'last_name', 'email', 'password', 'company', 'position'}.issubset(request.data):
 
             # проверяем пароль на сложность
-            sad = 'asd'
             try:
                 validate_password(request.data['password'])
             except Exception as password_error:
                 error_array = []
-                # noinspection PyTypeChecker
                 for item in password_error:
                     error_array.append(item)
                 return JsonResponse({'Status': False, 'Errors': {'password': error_array}})
@@ -61,11 +82,27 @@ class RegisterAccount(APIView):
                     user = user_serializer.save()
                     user.set_password(request.data['password'])
                     user.save()
+
+                    # Создаем токен для нового пользователя
+                    # token = ConfirmEmailToken.objects.create(user=user, key='3abeab8e34a5')
+                    # token.save()
+
                     return JsonResponse({'Status': True})
                 else:
                     return JsonResponse({'Status': False, 'Errors': user_serializer.errors})
+                
+       # Удаление пользователя методом DELETE
+    def delete(self, request, user_id, *args, **kwargs):
+        User = get_user_model()
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response({'detail': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        return JsonResponse({'Status': False, 'Errors': 'Не указаны все необходимые аргументы'})
+        user.delete()
+        print(f'User {user_id} deleted')
+        return Response({'detail': f'User with ID {user_id} has been successfully deleted.'}, status=status.HTTP_200_OK)
+        
 
 
 class ConfirmAccount(APIView):
@@ -87,17 +124,36 @@ class ConfirmAccount(APIView):
         # проверяем обязательные аргументы
         if {'email', 'token'}.issubset(request.data):
 
+            email = request.data['email']
+            token_value = request.data['token']
+
+            print(f"Received email: {email}")
+            print(f"Received token: {token_value}")
+
+            # Выводим все токены из базы данных
+            print("All tokens in the database:")
+            for token in ConfirmEmailToken.objects.all():
+                print(f"Email: {token.user.email}, Token: {token.key}")
+
+
+
+            print(f"Searching for token with email: {request.data['email']} and token: {request.data['token']}")
             token = ConfirmEmailToken.objects.filter(user__email=request.data['email'],
                                                      key=request.data['token']).first()
             if token:
+                print(f"Found token: {token.key} for user with email: {token.user.email}")
                 token.user.is_active = True
                 token.user.save()
                 token.delete()
                 return JsonResponse({'Status': True})
             else:
+                print("Token not found in the database")
                 return JsonResponse({'Status': False, 'Errors': 'Неправильно указан токен или email'})
 
+
+        print("Missing required arguments")
         return JsonResponse({'Status': False, 'Errors': 'Не указаны все необходимые аргументы'})
+
 
 
 class AccountDetails(APIView):
@@ -123,6 +179,11 @@ class AccountDetails(APIView):
                Returns:
                - Response: The response containing the details of the authenticated user.
         """
+
+        print("Request headers:", request.headers)
+        print("Request user:", request.user)
+
+
         if not request.user.is_authenticated:
             return JsonResponse({'Status': False, 'Error': 'Log in required'}, status=403)
 
@@ -167,6 +228,17 @@ class AccountDetails(APIView):
             return JsonResponse({'Status': False, 'Errors': user_serializer.errors})
 
 
+
+
+# Shoowing all Users in Base
+class UserListView(generics.ListAPIView):
+    queryset = get_user_model().objects.all()
+    serializer_class = UserSerializer
+
+
+
+
+
 class LoginAccount(APIView):
     """
     Класс для авторизации пользователей
@@ -174,27 +246,36 @@ class LoginAccount(APIView):
 
     # Авторизация методом POST
     def post(self, request, *args, **kwargs):
-        """
-                Authenticate a user.
-
-                Args:
-                    request (Request): The Django request object.
-
-                Returns:
-                    JsonResponse: The response indicating the status of the operation and any errors.
-                """
         if {'email', 'password'}.issubset(request.data):
-            user = authenticate(request, username=request.data['email'], password=request.data['password'])
+            email = request.data['email']
+            password = request.data['password']
+            print(f"Authenticating user with email: {email} and password: {password}")
 
-            if user is not None:
+            try:
+                user = User.objects.get(email=email)
+            except User.DoesNotExist:
+                print("User does not exist")
+                return JsonResponse({'Status': False, 'Errors': 'Пользователь с таким email не существует'})
+            
+            print(f"Hashed password for user '{email}' in the database: {user.password}")
+
+            if user.check_password(password):
+                print(f"Password check successful: Entered password '{password}' matches the password in the database for user '{email}'")
                 if user.is_active:
                     token, _ = Token.objects.get_or_create(user=user)
-
+                    user.token = token.key
+                    print("Created token:", token.key)
+                    user.save()
                     return JsonResponse({'Status': True, 'Token': token.key})
-
-            return JsonResponse({'Status': False, 'Errors': 'Не удалось авторизовать'})
+                else:
+                    print("User is not active")
+                    return JsonResponse({'Status': False, 'Errors': 'Пользователь не активен'})
+            else:
+                print(f"Password check failed: Entered password '{password}' does not match the password in the database for user '{email}'")
+                return JsonResponse({'Status': False, 'Errors': 'Неправильный пароль'})
 
         return JsonResponse({'Status': False, 'Errors': 'Не указаны все необходимые аргументы'})
+    
 
 
 class CategoryView(ListAPIView):
@@ -203,6 +284,8 @@ class CategoryView(ListAPIView):
     """
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
+
+
 
 
 class ShopView(ListAPIView):
